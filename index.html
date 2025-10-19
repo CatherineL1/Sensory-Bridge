@@ -1,1 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Feel It — multi-sensory learning</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <style>
+    :root{--bg:#0f172a;--fg:#e2e8f0;--accent:#38bdf8;font-family:system-ui,sans-serif}
+    body{margin:0;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;align-items:center;padding:2rem}
+    header{text-align:center;margin-bottom:2rem}
+    h1 em{color:var(--accent)}
+    section{background:#1e293b;padding:1.5rem;border-radius:.75rem;width:100%;max-width:28rem;margin-bottom:1rem}
+    input,textarea,select{width:100%;padding:.5rem;border:none;border-radius:.5rem;margin:.5rem 0}
+    button{background:var(--accent);color:var(--bg);border:none;padding:.6rem 1.2rem;border-radius:.5rem;font-weight:600;cursor:pointer}
+    button:hover{filter:brightness(1.1)}
+    #status{font-size:.9rem;margin-top:.5rem}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Don’t just learn it. <em>Feel it.</em></h1>
+  <p>Turn equations, text & shapes into vibration + sound.</p>
+</header>
 
+<main>
+  <section id="mathSec">
+    <h2>Math → Vibration</h2>
+    <input id="eqInput" type="text" placeholder="y = 0.5*x^2" aria-label="Equation"/>
+    <button id="feelMath">Feel equation</button>
+    <div id="status" aria-live="polite"></div>
+  </section>
+
+  <section id="textSec">
+    <h2>Text → Rhythm</h2>
+    <textarea id="textInput" rows="3" placeholder="Paste a passage…" aria-label="Text"></textarea>
+    <button id="feelText">Feel text</button>
+  </section>
+
+  <section id="shapeSec">
+    <h2>Shape → Spatial taps</h2>
+    <select id="shapeSelect" aria-label="Shape">
+      <option value="circle">Circle (continuous roll)</option>
+      <option value="triangle">Triangle (3 taps)</option>
+      <option value="square">Square (4 loops)</option>
+    </select>
+    <button id="feelShape">Feel shape</button>
+  </section>
+</main>
+
+<script>
+/* ========== helpers ========== */
+const $ = q => document.querySelector(q);
+const fireVibe = pattern => {
+  if (!('vibrate' in navigator)) return alert('Vibration not supported');
+  navigator.vibrate(pattern);
+};
+const status = msg => $('#status').textContent = msg;
+
+/* ========== math ========== */
+async function eq2vibe(latex){
+  const OPENAI_KEY = ''; // <-- paste key here for GPT-4o
+  if (!OPENAI_KEY){
+    // fallback: sine wave pattern
+    const arr = [];
+    for (let i=0;i<=100;i++){
+      const intensity = Math.round((Math.sin(i/10)+1)/2*255);
+      arr.push(intensity, 30);
+    }
+    return arr;
+  }
+  const prompt = `You are a haptics API. Convert the LaTeX equation into a vibration pattern.
+Reply ONLY a JSON array of {t:intensity} where t=time offset in ms, intensity=0-1. Total duration ≤ 3 000 ms. Use 50-ms steps.
+Example: y=2x → [{"t":0,"intensity":0.2},{"t":200,"intensity":0.2} …].
+Equation: ${latex}`;
+  const res = await fetch('https://api.openai.com/v1/chat/completions',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      Authorization:`Bearer ${OPENAI_KEY}`
+    },
+    body:JSON.stringify({model:'gpt-4o',temperature:0,messages:[{role:'user',content:prompt}]})
+  });
+  const raw = (await res.json()).choices[0].message.content.trim();
+  const arr = JSON.parse(raw);
+  return arr.map(p => Math.round(p.intensity*255));
+}
+$('#feelMath').onclick = async () => {
+  const latex = $('#eqInput').value.trim();
+  if (!latex) return;
+  status('Fetching pattern…');
+  const pattern = await eq2vibe(latex);
+  status('Playing…');
+  fireVibe(pattern);
+};
+
+/* ========== text ========== */
+function text2tactile(text){
+  const positive = (text.match(/\b(good|happy|calm|gentle|love|nice)\b/gi)||[]).length;
+  const negative = (text.match(/\b(bad|angry|tense|sharp|hate|ugly)\b/gi)||[]).length;
+  const score = positive - negative;
+  const bpm = Math.min(180, Math.max(60, 60 + (score+5)*12));
+  const interval = 60000/bpm;
+  const intensity = Math.min(1, Math.abs(score)/5 + 0.2);
+  const pulses = Math.min(15, 3 + Math.abs(score));
+  const pattern = [];
+  for (let i=0;i<pulses;i++){
+    pattern.push(Math.round(intensity*255));
+    pattern.push(Math.round(interval*0.7));
+  }
+  return {pattern};
+}
+$('#feelText').onclick = () => {
+  const txt = $('#textInput').value.trim();
+  if (!txt) return;
+  const {pattern} = text2tactile(txt);
+  fireVibe(pattern);
+};
+
+/* ========== shape ========== */
+function shape2spatial(shape){
+  const map = {
+    circle:  continuous(),
+    triangle:[100,150,100,150,100,150],
+    square:  [100,100,100,100,100,100,100,100]
+  };
+  return {pattern: map[shape] || map.circle};
+}
+function continuous(){
+  const out = [];
+  for (let i=0;i<20;i++){ out.push(40,50); }
+  return out;
+}
+$('#feelShape').onclick = () => {
+  const {pattern} = shape2spatial($('#shapeSelect').value);
+  fireVibe(pattern);
+};
+
+/* ========== PWA cache (optional) ========== */
+if ('serviceWorker' in navigator){
+  const code = `
+self.addEventListener('install', e => e.waitUntil(caches.open('v1').then(c => c.addAll(['./']))));
+self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+`;
+  const blob = new Blob([code], {type:'application/javascript'});
+  const url = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(url);
+}
+</script>
+</body>
+</html>
